@@ -4,10 +4,10 @@ from PIL import Image
 import os
 import zipfile
 import io
+import numpy as np
 
-# Tentar importar OpenCV e NumPy para deteção de rostos
+# Tentar importar apenas o OpenCV para deteção de rostos
 try:
-    import numpy as np
     import cv2
     HAVE_CV2 = True
 except ImportError:
@@ -16,7 +16,7 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-# Função de ocultar rostos: se cv2 não estiver disponível, retorna a imagem original
+# Função de ocultar rostos: se cv2 não estiver disponível, devolve imagem original
 if HAVE_CV2:
     def blur_face_suave(imagem_cv, x, y, w, h):
         rosto = imagem_cv[y:y+h, x:x+w]
@@ -40,7 +40,6 @@ if HAVE_CV2:
         return Image.fromarray(cv2.cvtColor(imagem_cv, cv2.COLOR_BGR2RGB))
 else:
     def ocultar_rostos(imagem_pil):
-        # OpenCV não instalado: devolve imagem sem alterações
         return imagem_pil
 
 @app.route("/upload", methods=["POST"])
@@ -55,32 +54,31 @@ def upload():
     dpi = request.form.get("dpi")
     ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
-    # DPI padrão
+    # DPI padrão 72
     try:
-        dpi = int(dpi)
-        if dpi <= 0:
-            dpi = 72
+        dpi_val = int(dpi)
+        if dpi_val <= 0:
+            dpi_val = 72
     except:
-        dpi = 72
-    dpi = (dpi, dpi)
+        dpi_val = 72
+    dpi_tuple = (dpi_val, dpi_val)
 
     # Validar largura/altura
     try:
-        width = int(width)
-        if width <= 0: width = None
+        width_int = int(width) if width and int(width) > 0 else None
     except:
-        width = None
+        width_int = None
     try:
-        height = int(height)
-        if height <= 0: height = None
+        height_int = int(height) if height and int(height) > 0 else None
     except:
-        height = None
+        height_int = None
 
     # Extrair ficheiros
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
         with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
-            extracted_files = [zip_ref.open(name) for name in zip_ref.namelist() if name.lower().endswith((".png",".jpg",".jpeg"))]
+            extracted_files = [zip_ref.open(name) for name in zip_ref.namelist()
+                               if name.lower().endswith((".png",".jpg",".jpeg"))]
     else:
         extracted_files = files[:30]
 
@@ -93,32 +91,33 @@ def upload():
             try:
                 filename = getattr(file, 'filename', getattr(file, 'name', 'image'))
                 with Image.open(file) as img:
-                    original_format = img.format
+                    original_format = img.format or 'PNG'
                     img = img.convert("RGB")
 
                     if ocultar_faces:
                         img = ocultar_rostos(img)
-                    
-                    if width and height:
-                        img = img.resize((width, height), Image.LANCZOS)
-                    elif resize != 1.0:
-                        img = img.resize((int(img.width*resize), int(img.height*resize)), Image.LANCZOS)
 
-                    save_kwargs = {"quality": quality, "dpi": dpi}
+                    # Redimensionar
+                    if width_int and height_int:
+                        img = img.resize((width_int, height_int), Image.LANCZOS)
+                    elif resize != 1.0:
+                        img = img.resize((int(img.width * resize), int(img.height * resize)), Image.LANCZOS)
+
+                    save_kwargs = {"quality": quality, "dpi": dpi_tuple}
                     base, _ = os.path.splitext(os.path.basename(filename))
 
                     # Formato original
-                    if output_format in ("original","both"):
+                    if output_format in ("original", "both"):
                         buf = io.BytesIO()
                         img.save(buf, format=original_format, **save_kwargs)
                         zip_out.writestr(f"{base}_orig.{original_format.lower()}", buf.getvalue())
-                    # Converter para JPG
-                    if output_format in ("jpg","both"):
+                    # JPG
+                    if output_format in ("jpg", "both"):
                         buf = io.BytesIO()
                         img.save(buf, format="JPEG", **save_kwargs)
                         zip_out.writestr(f"{base}.jpg", buf.getvalue())
-                    # Converter para PNG
-                    if output_format in ("png","both"):
+                    # PNG
+                    if output_format in ("png", "both"):
                         buf = io.BytesIO()
                         img.save(buf, format="PNG", **save_kwargs)
                         zip_out.writestr(f"{base}.png", buf.getvalue())
