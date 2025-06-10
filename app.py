@@ -4,41 +4,44 @@ from PIL import Image
 import os
 import zipfile
 import io
-import tempfile
-import numpy as np
-import cv2
+
+# Tentar importar OpenCV e NumPy para deteção de rostos
+try:
+    import numpy as np
+    import cv2
+    HAVE_CV2 = True
+except ImportError:
+    HAVE_CV2 = False
 
 app = Flask(__name__)
 CORS(app)
 
-def blur_face_suave(imagem_cv, x, y, w, h):
-    rosto = imagem_cv[y:y+h, x:x+w]
-    rosto_blur = cv2.GaussianBlur(rosto, (99, 99), 30)
+# Função de ocultar rostos: se cv2 não estiver disponível, retorna a imagem original
+if HAVE_CV2:
+    def blur_face_suave(imagem_cv, x, y, w, h):
+        rosto = imagem_cv[y:y+h, x:x+w]
+        rosto_blur = cv2.GaussianBlur(rosto, (99, 99), 30)
+        mask = np.zeros_like(rosto[:, :, 0])
+        center = (w // 2, h // 2)
+        radius = min(w, h) // 2
+        cv2.circle(mask, center, radius, 255, -1)
+        mask = cv2.GaussianBlur(mask, (31, 31), 0)
+        mask_3c = cv2.merge([mask, mask, mask]) / 255.0
+        resultado = (rosto * (1 - mask_3c) + rosto_blur * mask_3c).astype(np.uint8)
+        imagem_cv[y:y+h, x:x+w] = resultado
+        return imagem_cv
 
-    # Criar máscara circular com bordas suavizadas
-    mask = np.zeros_like(rosto[:, :, 0])
-    center = (w // 2, h // 2)
-    radius = min(w, h) // 2
-    cv2.circle(mask, center, radius, 255, -1)
-    mask = cv2.GaussianBlur(mask, (31, 31), 0)  # suavizar bordas da máscara
-
-    mask_3c = cv2.merge([mask, mask, mask]) / 255.0
-
-    # Combinar imagem original com desfoque, usando máscara suavizada
-    resultado = (rosto * (1 - mask_3c) + rosto_blur * mask_3c).astype(np.uint8)
-    imagem_cv[y:y+h, x:x+w] = resultado
-
-    return imagem_cv
-
-def ocultar_rostos(imagem_pil):
-    imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2BGR)
-    classificador = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.05, minNeighbors=6, minSize=(30, 30))
-
-    for (x, y, w, h) in rostos:
-        imagem_cv = blur_face_suave(imagem_cv, x, y, w, h)
-
-    return Image.fromarray(cv2.cvtColor(imagem_cv, cv2.COLOR_BGR2RGB))
+    def ocultar_rostos(imagem_pil):
+        imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2BGR)
+        classificador = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.05, minNeighbors=6, minSize=(30, 30))
+        for (x, y, w, h) in rostos:
+            imagem_cv = blur_face_suave(imagem_cv, x, y, w, h)
+        return Image.fromarray(cv2.cvtColor(imagem_cv, cv2.COLOR_BGR2RGB))
+else:
+    def ocultar_rostos(imagem_pil):
+        # OpenCV não instalado: devolve imagem sem alterações
+        return imagem_pil
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -52,17 +55,34 @@ def upload():
     dpi = request.form.get("dpi")
     ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
-    dpi = (int(dpi), int(dpi)) if dpi else None
-    width = int(width) if width and width.isdigit() else None
-    height = int(height) if height and height.isdigit() else None
+    # DPI padrão
+    try:
+        dpi = int(dpi)
+        if dpi <= 0:
+            dpi = 72
+    except:
+        dpi = 72
+    dpi = (dpi, dpi)
 
+    # Validar largura/altura
+    try:
+        width = int(width)
+        if width <= 0: width = None
+    except:
+        width = None
+    try:
+        height = int(height)
+        if height <= 0: height = None
+    except:
+        height = None
+
+    # Extrair ficheiros
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
         with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
-            extracted_files = [zip_ref.open(name) for name in zip_ref.namelist()
-                               if name.lower().endswith((".png", ".jpg", ".jpeg"))]
+            extracted_files = [zip_ref.open(name) for name in zip_ref.namelist() if name.lower().endswith((".png",".jpg",".jpeg"))]
     else:
-        extracted_files = files[:30]  # máximo 30 ficheiros
+        extracted_files = files[:30]
 
     if not extracted_files:
         return jsonify({"error": "Nenhum ficheiro válido fornecido."}), 400
@@ -71,40 +91,37 @@ def upload():
     with zipfile.ZipFile(output_zip, 'w') as zip_out:
         for file in extracted_files:
             try:
-                filename = file.filename if hasattr(file, 'filename') else file.name
+                filename = getattr(file, 'filename', getattr(file, 'name', 'image'))
                 with Image.open(file) as img:
                     original_format = img.format
                     img = img.convert("RGB")
 
                     if ocultar_faces:
                         img = ocultar_rostos(img)
+                    
+                    if width and height:
+                        img = img.resize((width, height), Image.LANCZOS)
+                    elif resize != 1.0:
+                        img = img.resize((int(img.width*resize), int(img.height*resize)), Image.LANCZOS)
 
-                    if resize != 1.0:
-                        img = img.resize((int(img.width * resize), int(img.height * resize)))
-                    elif width and height:
-                        img = img.resize((width, height))
+                    save_kwargs = {"quality": quality, "dpi": dpi}
+                    base, _ = os.path.splitext(os.path.basename(filename))
 
-                    save_kwargs = {"quality": quality}
-                    if dpi:
-                        save_kwargs["dpi"] = dpi
-
-                    base_name, _ = os.path.splitext(os.path.basename(filename))
-
-                    if output_format == "original" or output_format == "both":
-                        buffer_orig = io.BytesIO()
-                        img.save(buffer_orig, format=original_format, **save_kwargs)
-                        zip_out.writestr(f"{base_name}_compressed.{original_format.lower()}", buffer_orig.getvalue())
-
-                    if output_format == "jpg" or output_format == "both":
-                        buffer_jpg = io.BytesIO()
-                        img.save(buffer_jpg, format="JPEG", **save_kwargs)
-                        zip_out.writestr(f"{base_name}.jpg", buffer_jpg.getvalue())
-
-                    if output_format == "png" or output_format == "both":
-                        buffer_png = io.BytesIO()
-                        img.save(buffer_png, format="PNG", **save_kwargs)
-                        zip_out.writestr(f"{base_name}.png", buffer_png.getvalue())
-
+                    # Formato original
+                    if output_format in ("original","both"):
+                        buf = io.BytesIO()
+                        img.save(buf, format=original_format, **save_kwargs)
+                        zip_out.writestr(f"{base}_orig.{original_format.lower()}", buf.getvalue())
+                    # Converter para JPG
+                    if output_format in ("jpg","both"):
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", **save_kwargs)
+                        zip_out.writestr(f"{base}.jpg", buf.getvalue())
+                    # Converter para PNG
+                    if output_format in ("png","both"):
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG", **save_kwargs)
+                        zip_out.writestr(f"{base}.png", buf.getvalue())
             except Exception as e:
                 return jsonify({"error": f"Erro ao processar {filename}: {str(e)}"}), 400
 
@@ -113,4 +130,3 @@ def upload():
 
 if __name__ == "__main__":
     app.run(debug=True, port=10000)
-
