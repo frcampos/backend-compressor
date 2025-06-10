@@ -4,21 +4,39 @@ from PIL import Image
 import os
 import zipfile
 import io
+import tempfile
 import numpy as np
 import cv2
 
 app = Flask(__name__)
 CORS(app)
 
+def blur_face_suave(imagem_cv, x, y, w, h):
+    rosto = imagem_cv[y:y+h, x:x+w]
+    rosto_blur = cv2.GaussianBlur(rosto, (99, 99), 30)
+
+    # Criar máscara circular com bordas suavizadas
+    mask = np.zeros_like(rosto[:, :, 0])
+    center = (w // 2, h // 2)
+    radius = min(w, h) // 2
+    cv2.circle(mask, center, radius, 255, -1)
+    mask = cv2.GaussianBlur(mask, (31, 31), 0)  # suavizar bordas da máscara
+
+    mask_3c = cv2.merge([mask, mask, mask]) / 255.0
+
+    # Combinar imagem original com desfoque, usando máscara suavizada
+    resultado = (rosto * (1 - mask_3c) + rosto_blur * mask_3c).astype(np.uint8)
+    imagem_cv[y:y+h, x:x+w] = resultado
+
+    return imagem_cv
+
 def ocultar_rostos(imagem_pil):
     imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2BGR)
     classificador = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.1, minNeighbors=5)
+    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.05, minNeighbors=6, minSize=(30, 30))
 
     for (x, y, w, h) in rostos:
-        rosto = imagem_cv[y:y+h, x:x+w]
-        rosto_blur = cv2.GaussianBlur(rosto, (99, 99), 30)
-        imagem_cv[y:y+h, x:x+w] = rosto_blur
+        imagem_cv = blur_face_suave(imagem_cv, x, y, w, h)
 
     return Image.fromarray(cv2.cvtColor(imagem_cv, cv2.COLOR_BGR2RGB))
 
@@ -27,34 +45,16 @@ def upload():
     files = request.files.getlist("files")
     zip_file = request.files.get("zip_file")
     quality = int(request.form.get("quality", 75))
+    resize = float(request.form.get("resize", 1.0))
     width = request.form.get("width")
     height = request.form.get("height")
     output_format = request.form.get("output_format", "original")
     dpi = request.form.get("dpi")
     ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
-    # DPI padrão a 72 se não fornecido ou inválido
-    try:
-        dpi = int(dpi)
-        if dpi <= 0:
-            dpi = 72
-    except (TypeError, ValueError):
-        dpi = 72
-
-    # Validar largura e altura, ignorar se inválido ou <= 0
-    try:
-        width = int(width)
-        if width <= 0:
-            width = None
-    except (TypeError, ValueError):
-        width = None
-
-    try:
-        height = int(height)
-        if height <= 0:
-            height = None
-    except (TypeError, ValueError):
-        height = None
+    dpi = (int(dpi), int(dpi)) if dpi else None
+    width = int(width) if width and width.isdigit() else None
+    height = int(height) if height and height.isdigit() else None
 
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
@@ -79,11 +79,14 @@ def upload():
                     if ocultar_faces:
                         img = ocultar_rostos(img)
 
-                    # Redimensionar se largura e altura definidas, senão mantém original
-                    if width and height:
-                        img = img.resize((width, height), Image.LANCZOS)
+                    if resize != 1.0:
+                        img = img.resize((int(img.width * resize), int(img.height * resize)))
+                    elif width and height:
+                        img = img.resize((width, height))
 
-                    save_kwargs = {"quality": quality, "dpi": (dpi, dpi)}
+                    save_kwargs = {"quality": quality}
+                    if dpi:
+                        save_kwargs["dpi"] = dpi
 
                     base_name, _ = os.path.splitext(os.path.basename(filename))
 
@@ -110,3 +113,4 @@ def upload():
 
 if __name__ == "__main__":
     app.run(debug=True, port=10000)
+
