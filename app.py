@@ -4,7 +4,6 @@ from PIL import Image
 import os
 import zipfile
 import io
-import tempfile
 import numpy as np
 import cv2
 
@@ -28,16 +27,34 @@ def upload():
     files = request.files.getlist("files")
     zip_file = request.files.get("zip_file")
     quality = int(request.form.get("quality", 75))
-    resize = float(request.form.get("resize", 1.0))
     width = request.form.get("width")
     height = request.form.get("height")
     output_format = request.form.get("output_format", "original")
     dpi = request.form.get("dpi")
     ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
-    dpi = (int(dpi), int(dpi)) if dpi else None
-    width = int(width) if width and width.isdigit() else None
-    height = int(height) if height and height.isdigit() else None
+    # DPI padrão a 72 se não fornecido ou inválido
+    try:
+        dpi = int(dpi)
+        if dpi <= 0:
+            dpi = 72
+    except (TypeError, ValueError):
+        dpi = 72
+
+    # Validar largura e altura, ignorar se inválido ou <= 0
+    try:
+        width = int(width)
+        if width <= 0:
+            width = None
+    except (TypeError, ValueError):
+        width = None
+
+    try:
+        height = int(height)
+        if height <= 0:
+            height = None
+    except (TypeError, ValueError):
+        height = None
 
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
@@ -62,14 +79,11 @@ def upload():
                     if ocultar_faces:
                         img = ocultar_rostos(img)
 
-                    if resize != 1.0:
-                        img = img.resize((int(img.width * resize), int(img.height * resize)))
-                    elif width and height:
-                        img = img.resize((width, height))
+                    # Redimensionar se largura e altura definidas, senão mantém original
+                    if width and height:
+                        img = img.resize((width, height), Image.LANCZOS)
 
-                    save_kwargs = {"quality": quality}
-                    if dpi:
-                        save_kwargs["dpi"] = dpi
+                    save_kwargs = {"quality": quality, "dpi": (dpi, dpi)}
 
                     base_name, _ = os.path.splitext(os.path.basename(filename))
 
