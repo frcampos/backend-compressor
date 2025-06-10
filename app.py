@@ -36,8 +36,8 @@ def upload():
     ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
     dpi = (int(dpi), int(dpi)) if dpi else None
-    width = int(width) if width and width.isdigit() else 0
-    height = int(height) if height and height.isdigit() else 0
+    width = int(width) if width and width.isdigit() else None
+    height = int(height) if height and height.isdigit() else None
 
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
@@ -64,7 +64,7 @@ def upload():
 
                     if resize != 1.0:
                         img = img.resize((int(img.width * resize), int(img.height * resize)))
-                    elif width > 0 and height > 0:
+                    elif width and height:
                         img = img.resize((width, height))
 
                     save_kwargs = {"quality": quality}
@@ -96,4 +96,3 @@ def upload():
 
 if __name__ == "__main__":
     app.run(debug=True, port=10000)
-
