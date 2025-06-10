@@ -3,6 +3,8 @@ from PIL import Image
 from io import BytesIO
 import zipfile
 import os
+from flask_cors import CORS
+
 
 app = Flask(__name__)
 
