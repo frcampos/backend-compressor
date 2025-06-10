@@ -5,9 +5,23 @@ import os
 import zipfile
 import io
 import tempfile
+import numpy as np
+import cv2
 
 app = Flask(__name__)
 CORS(app)
+
+def ocultar_rostos(imagem_pil):
+    imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2BGR)
+    classificador = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.1, minNeighbors=5)
+
+    for (x, y, w, h) in rostos:
+        rosto = imagem_cv[y:y+h, x:x+w]
+        rosto_blur = cv2.GaussianBlur(rosto, (99, 99), 30)
+        imagem_cv[y:y+h, x:x+w] = rosto_blur
+
+    return Image.fromarray(cv2.cvtColor(imagem_cv, cv2.COLOR_BGR2RGB))
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -19,8 +33,9 @@ def upload():
     height = request.form.get("height")
     output_format = request.form.get("output_format", "original")
     dpi = request.form.get("dpi")
-    dpi = (int(dpi), int(dpi)) if dpi else None
+    ocultar_faces = request.form.get("ocultar_faces", "false") == "true"
 
+    dpi = (int(dpi), int(dpi)) if dpi else None
     width = int(width) if width and width.isdigit() else 0
     height = int(height) if height and height.isdigit() else 0
 
@@ -43,6 +58,9 @@ def upload():
                 with Image.open(file) as img:
                     original_format = img.format
                     img = img.convert("RGB")
+
+                    if ocultar_faces:
+                        img = ocultar_rostos(img)
 
                     if resize != 1.0:
                         img = img.resize((int(img.width * resize), int(img.height * resize)))
@@ -78,3 +96,4 @@ def upload():
 
 if __name__ == "__main__":
     app.run(debug=True, port=10000)
+
