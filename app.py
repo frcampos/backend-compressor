@@ -50,10 +50,11 @@ def upload():
                 img.load()
 
                 if width > 0 and height > 0:
-                    img = img.resize((width, height), Image.ANTIALIAS)
+                    img = img.resize((width, height), Image.Resampling.LANCZOS)
                 elif resize < 1.0:
                     new_size = (int(img.width * resize), int(img.height * resize))
-                    img = img.resize(new_size, Image.ANTIALIAS)
+                    img = img.resize(new_size, Image.Resampling.LANCZOS)
+
 
                 output_io = io.BytesIO()
                 fname, ext = os.path.splitext(filename)
