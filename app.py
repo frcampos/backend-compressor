@@ -15,11 +15,14 @@ def upload():
     zip_file = request.files.get("zip_file")
     quality = int(request.form.get("quality", 75))
     resize = float(request.form.get("resize", 1.0))
-    width = int(request.form.get("width", 0))
-    height = int(request.form.get("height", 0))
+    width = request.form.get("width")
+    height = request.form.get("height")
     output_format = request.form.get("output_format", "original")
     dpi = request.form.get("dpi")
     dpi = (int(dpi), int(dpi)) if dpi else None
+
+    width = int(width) if width and width.isdigit() else 0
+    height = int(height) if height and height.isdigit() else 0
 
     if zip_file:
         zip_bytes = io.BytesIO(zip_file.read())
