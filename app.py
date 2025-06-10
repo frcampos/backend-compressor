@@ -1,53 +1,74 @@
 from flask import Flask, request, send_file, jsonify
-from PIL import Image
-from io import BytesIO
-import zipfile
-import os
 from flask_cors import CORS
-
+from PIL import Image
+import os
+import io
+import zipfile
+import uuid
 
 app = Flask(__name__)
+CORS(app)  # <- Esta linha ativa o CORS
 
-@app.route('/upload', methods=['POST'])
-def upload_images():
-    if 'images' not in request.files:
-        return jsonify({'error': 'Nenhuma imagem enviada'}), 400
-
-    files = request.files.getlist('images')
-    if len(files) > 10:
-        return jsonify({'error': 'Máximo de 10 imagens permitido'}), 400
-
-    zip_buffer = BytesIO()
-    zip_file = zipfile.ZipFile(zip_buffer, 'w')
-
-    for file in files:
-        image = Image.open(file.stream)
-        img_format = 'JPEG' if image.mode != 'RGBA' else 'PNG'
-        image = image.convert('RGB') if img_format == 'JPEG' else image
-
-        buffer = BytesIO()
-        if img_format == 'JPEG':
-            image.save(buffer, format='JPEG', quality=60)
-        else:
-            image.save(buffer, format='PNG', optimize=True)
-
-        buffer.seek(0)
-        filename = f"{os.path.splitext(file.filename)[0]}_compressed.{img_format.lower()}"
-        zip_file.writestr(filename, buffer.getvalue())
-
-    zip_file.close()
-    zip_buffer.seek(0)
-
-    return send_file(
-        zip_buffer,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name='imagens_comprimidas.zip'
-    )
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @app.route('/')
 def index():
-    return 'API de compressão de imagens ativa.'
+    return "API de compressão de imagens ativa."
+
+@app.route('/upload', methods=['POST'])
+def upload_files():
+    if 'files' not in request.files:
+        return jsonify({'error': 'Nenhum ficheiro enviado.'}), 400
+
+    files = request.files.getlist('files')
+    if len(files) > 10:
+        return jsonify({'error': 'Número máximo de 10 ficheiros excedido.'}), 400
+
+    compressed_images = []
+    stats = []
+
+    for f in files:
+        try:
+            img = Image.open(f.stream)
+            original_size = f.content_length or 0
+
+            output_io = io.BytesIO()
+            filename, ext = os.path.splitext(f.filename)
+            ext = ext.lower()
+
+            # Guardar como JPG ou PNG comprimido
+            if ext in ['.jpg', '.jpeg']:
+                img.convert("RGB").save(output_io, format="JPEG", quality=60)
+                ext_out = '.jpg'
+            else:
+                img.save(output_io, format="PNG", optimize=True)
+                ext_out = '.png'
+
+            output_io.seek(0)
+            new_filename = f"{filename}_conv{ext_out}"
+            compressed_images.append((new_filename, output_io))
+
+            compressed_size = len(output_io.getvalue())
+
+            stats.append({
+                'ficheiro': f.filename,
+                'original_kb': round(original_size / 1024, 1),
+                'comprimido_kb': round(compressed_size / 1024, 1)
+            })
+
+        except Exception as e:
+            return jsonify({'error': f'Erro ao processar {f.filename}: {str(e)}'}), 500
+
+    # Criar ZIP
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zipf:
+        for filename, img_io in compressed_images:
+            zipf.writestr(filename, img_io.getvalue())
+
+    zip_buffer.seek(0)
+    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='comprimidos.zip')
 
 if __name__ == '__main__':
     app.run(debug=True)
+
