@@ -13,7 +13,7 @@ CORS(app)
 def ocultar_rostos(imagem_pil):
     imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2BGR)
     classificador = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.08, minNeighbors=8)
+    rostos = classificador.detectMultiScale(imagem_cv, scaleFactor=1.07, minNeighbors=8)
 
     for (x, y, w, h) in rostos:
         rosto = imagem_cv[y:y+h, x:x+w]
