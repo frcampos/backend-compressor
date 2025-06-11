@@ -109,4 +109,7 @@ def upload():
     return send_file(output_zip, download_name="imagens_comprimidas.zip", as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(debug=True, port=10000)
+    # Em produção (no Render), o gunicorn (start command) é quem lança a app.
+    # Em ambiente local, arrancar sem debug para poupar memória:
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), debug=False)
+
